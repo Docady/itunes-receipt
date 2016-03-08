@@ -54,7 +54,7 @@ module Itunes
     )
 
     def expired?
-      !@expires_date.blank?
+      !@expires_date.blank? && @expires_date < Time.now
     end
 
     def cancelled?
