@@ -14,6 +14,7 @@ module Itunes
     class ReceiptServerOffline   < VerificationFailed; end
     class ExpiredReceiptReceived < VerificationFailed
       attr_reader :receipt
+
       def initialize(attributes = {})
         @receipt = attributes[:receipt]
         super attributes
@@ -58,48 +59,34 @@ module Itunes
     end
 
     def cancelled?
-      !cancellation_date.blank?
+      !@cancellation_date.blank?
     end
 
     def initialize(attributes = {})
-      receipt_attributes   = attributes.with_indifferent_access[:receipt]
-      @adam_id             = receipt_attributes[:adam_id]
-      @app_item_id         = receipt_attributes[:app_item_id]
-      @application_version = receipt_attributes[:application_version]
-      @bid                 = receipt_attributes[:bid]
-      @bundle_id           = receipt_attributes[:bundle_id]
-      @bvrs                = receipt_attributes[:bvrs]
-      @cancellation_date   = if receipt_attributes[:cancellation_date]
-                               Time.parse receipt_attributes[:cancellation_date].sub('Etc/GMT', 'GMT')
-                             end
-      @cancellation_date_ms = if receipt_attributes[:cancellation_date_ms]
-                                receipt_attributes[:cancellation_date_ms].to_i
-                              end
-      @cancellation_date_pst = if receipt_attributes[:cancellation_date_pst]
-                                 Time.parse receipt_attributes[:cancellation_date_pst].sub('America/Los_Angeles', 'PST')
-                               end
-      @download_id  = receipt_attributes[:download_id]
-      @expires_date = if receipt_attributes[:expires_date]
+      receipt_attributes     = attributes.with_indifferent_access[:receipt]
+      @adam_id               = receipt_attributes[:adam_id]
+      @app_item_id           = receipt_attributes[:app_item_id]
+      @application_version   = receipt_attributes[:application_version]
+      @bid                   = receipt_attributes[:bid]
+      @bundle_id             = receipt_attributes[:bundle_id]
+      @bvrs                  = receipt_attributes[:bvrs]
+      @cancellation_date     = parse_regular_date(receipt_attributes[:cancellation_date]) if receipt_attributes[:cancellation_date]
+      @cancellation_date_ms  = receipt_attributes[:cancellation_date_ms].to_i             if receipt_attributes[:cancellation_date_ms]
+      @cancellation_date_pst = parse_pst_date(receipt_attributes[:cancellation_date_pst]) if receipt_attributes[:cancellation_date_pst]
+      @download_id           = receipt_attributes[:download_id]
+      @expires_date          = if receipt_attributes[:expires_date]
                         if receipt_attributes[:expires_date] =~ /^\d+$/
                           Time.at(receipt_attributes[:expires_date].to_i / 1000)
                         else
-                          Time.parse receipt_attributes[:expires_date].sub('Etc/GMT', 'GMT')
+                          parse_regular_date(receipt_attributes[:expires_date])
                         end
                       end
-      @expires_date_ms = if receipt_attributes[:expires_date_ms]
-                           receipt_attributes[:expires_date_ms].to_i
-                         end
-      @expires_date_pst = if receipt_attributes[:expires_date_pst]
-                            Time.parse receipt_attributes[:expires_date_pst].sub('America/Los_Angeles', 'PST')
-                          end
-      @in_app       = if receipt_attributes[:in_app]
-        receipt_attributes[:in_app].map { |ia| self.class.new(:receipt => ia) }
-      end
-      @is_trial_period = if receipt_attributes[:is_trial_period]
-        receipt_attributes[:is_trial_period] == "true"
-      end
-      @itunes_env = attributes[:itunes_env] || Itunes.itunes_env
-      @latest     = case attributes[:latest_receipt_info]
+      @expires_date_ms  = receipt_attributes[:expires_date_ms].to_i                               if receipt_attributes[:expires_date_ms]
+      @expires_date_pst = parse_pst_date(receipt_attributes[:expires_date_pst])                   if receipt_attributes[:expires_date_pst]
+      @in_app           = receipt_attributes[:in_app].map { |ia| self.class.new(:receipt => ia) } if receipt_attributes[:in_app]
+      @is_trial_period  = receipt_attributes[:is_trial_period] == "true"                          if receipt_attributes[:is_trial_period]
+      @itunes_env       = attributes[:itunes_env] || Itunes.itunes_env
+      @latest           = case attributes[:latest_receipt_info]
       when Hash
         self.class.new(
           :receipt        => attributes[:latest_receipt_info],
@@ -114,7 +101,8 @@ module Itunes
             :receipt_type   => :latest
           )
         end
-      end
+                          end
+
       @original = if receipt_attributes[:original_transaction_id] || receipt_attributes[:original_purchase_date]
         self.class.new(:receipt => {
           :transaction_id      => receipt_attributes[:original_transaction_id],
@@ -123,32 +111,18 @@ module Itunes
           :purchase_date_pst   => receipt_attributes[:original_purchase_date_pst],
           :application_version => receipt_attributes[:original_application_version]
         })
-      end
-      @product_id = receipt_attributes[:product_id]
-      @purchase_date = if receipt_attributes[:purchase_date]
-        Time.parse receipt_attributes[:purchase_date].sub('Etc/GMT', 'GMT')
-      end
-      @purchase_date_ms = if receipt_attributes[:purchase_date_ms]
-        receipt_attributes[:purchase_date_ms].to_i
-      end
-      @purchase_date_pst = if receipt_attributes[:purchase_date_pst]
-        Time.parse receipt_attributes[:purchase_date_pst].sub('America/Los_Angeles', 'PST')
-      end
-      @quantity = if receipt_attributes[:quantity]
-        receipt_attributes[:quantity].to_i
-      end
-      @receipt_data = if attributes[:receipt_type] == :latest
-        attributes[:latest_receipt]
-      end
-      @request_date = if receipt_attributes[:request_date]
-        Time.parse receipt_attributes[:request_date].sub('Etc/', '')
-      end
-      @request_date_ms = if receipt_attributes[:request_date_ms]
-        receipt_attributes[:request_date_ms].to_i
-      end
-      @request_date_pst = if receipt_attributes[:request_date_pst]
-        Time.parse receipt_attributes[:request_date_pst].sub('America/Los_Angeles', 'PST')
-      end
+                  end
+
+      @product_id        = receipt_attributes[:product_id]
+      @purchase_date     = parse_regular_date(receipt_attributes[:purchase_date])       if receipt_attributes[:purchase_date]
+      @purchase_date_ms  = receipt_attributes[:purchase_date_ms].to_i                   if receipt_attributes[:purchase_date_ms]
+      @purchase_date_pst = parse_pst_date(receipt_attributes[:purchase_date_pst])       if receipt_attributes[:purchase_date_pst]
+      @request_date      = Time.parse receipt_attributes[:request_date].sub('Etc/', '') if receipt_attributes[:request_date]
+      @request_date_ms   = receipt_attributes[:request_date_ms].to_i                    if receipt_attributes[:request_date_ms]
+      @request_date_pst  = parse_pst_date(receipt_attributes[:request_date_pst])        if receipt_attributes[:request_date_pst]
+      @receipt_data      = attributes[:latest_receipt]                                  if attributes[:receipt_type] == :latest
+      @quantity          = receipt_attributes[:quantity].to_i                           if receipt_attributes[:quantity]
+
       @transaction_id              = receipt_attributes[:transaction_id]
       @version_external_identifier = receipt_attributes[:version_external_identifier]
       @web_order_line_item_id      = receipt_attributes[:web_order_line_item_id]
@@ -159,7 +133,7 @@ module Itunes
     end
 
     def sandbox?
-      itunes_env == :sandbox
+      @itunes_env == :sandbox
     end
 
     def self.verify!(receipt_data, allow_sandbox_receipt = false)
@@ -174,9 +148,7 @@ module Itunes
         #   FAQ#16
         if allow_sandbox_receipt
           sandbox_response = post_to_endpoint(request_data, Itunes::ENDPOINT[:sandbox])
-          successful_response(
-            sandbox_response.merge(:itunes_env => :sandbox)
-          )
+          successful_response(sandbox_response.merge(:itunes_env => :sandbox))
         else
           raise e
         end
@@ -184,6 +156,14 @@ module Itunes
     end
 
     private
+
+    def parse_pst_date(pst_date)
+      Time.parse pst_date.sub('America/Los_Angeles', 'PST')
+    end
+
+    def parse_regular_date(regular_date)
+      Time.parse regular_date.sub('Etc/GMT', 'GMT')
+    end
 
     def self.post_to_endpoint(request_data, endpoint = Itunes.endpoint)
       response = RestClient.post(
